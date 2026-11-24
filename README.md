@@ -1,27 +1,30 @@
-﻿# CongoConnect — Prototype Local (Node.js)
+﻿# CongoConnect Platform
 
-Prototype local de plateforme d authentification par OTP, de verification d identite simulee, d emission/verification de jetons signes (`cc1.*`), d annuaire de fournisseurs et de journalisation d audit.
+Plateforme de verification d identite, gestion OTP, emission/revocation de jetons PKI (`cc1.`) et supervision d audit (`GET /app`).
 
-## Structure du projet
-- `.env.example` : variables d environnement
-- `.gitignore` : exclusions Git (`node_modules/`, `logs/`, `.env`)
-- `public/index.html` : interface web locale (`/app`)
-- `src/server.js` : serveur HTTP et routage API
-- `src/config/env.js` : configuration et modes de stockage
-- `src/services/` : `otpService.js`, `identityProviderSim.js`, `pkiService.js`, `serviceProviderRegistry.js`, `auditLogService.js`
-- `src/storage/auditStore.js` : persistance memoire + fichier `logs/audit.log`
-- `test/smoke.test.js` : tests automatises (`node --test`)
+## Architecture et adaptateurs
 
-## Demarrage rapide
-1. Lancer le serveur : `node .\src\server.js`
-2. Ouvrir l interface : `http://localhost:3000/app`
-3. Lancer les tests (2e fenetre) : `node --test .\test\smoke.test.js`
+- **Console web (`/app`)** : creation/suivi des demandes, generation et verification OTP, gestion des jetons `cc1.` (`tokenPanel`) et visionneuse d audit filtrable (`auditPanel`).
+- **Sante et observabilite** :
+  - `GET /health` : expose l etat du service et le mode des adaptateurs (`redis`, `postgres`) sans fuite de secrets.
+  - `GET /api/audit` : journal d audit filtrable par `event`, `outcome` et `limit` avec masquage des identifiants.
+- **Jetons `cc1.`** :
+  - `POST /api/token/issue` : emission de jeton signe avec `jti`, `scope` et `ttlSeconds`.
+  - `POST /api/token/verify` : verification de signature, expiration (`exp`), revocation (`jti`) et `requiredScope`.
+  - `POST /api/token/revoke` : revocation d un jeton par `jti` avec trace `TOKEN_REVOKE` dans l audit.
 
-## Routes principales
-- `GET /` et `GET /health`
-- `GET /app`
-- `POST /api/otp/request` et `POST /api/otp/verify`
-- `POST /api/identity/lookup`
-- `GET /api/providers`
-- `POST /api/token/issue` et `POST /api/token/verify`
-- `GET /api/audit`
+## Configuration (`.env`)
+
+Copier `.env.example` puis renseigner les variables selon l environnement :
+
+- `PORT` : port d ecoute HTTP (par defaut `3000`).
+- `HIDE_OTP_IN_RESPONSE` : `true` pour masquer les codes OTP en production.
+- `CONGOCONNECT_TOKEN_SECRET` : secret HMAC de signature/verification des jetons `cc1.`.
+- `REDIS_URL` : URL Redis (repli automatique sur stockage memoire si non renseignee).
+- `DATABASE_URL` : URL PostgreSQL pour la persistance d audit.
+
+## Demarrage et tests
+
+```powershell
+node .\src\server.js
+node --test .\test\smoke.test.js
