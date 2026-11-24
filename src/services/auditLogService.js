@@ -1,4 +1,8 @@
-﻿const { appendAuditEntry, readAuditEntries } = require('../storage/auditStore');
+﻿const {
+  appendAuditEntry,
+  persistAuditEntryToPg,
+  readAuditEntries
+} = require('../storage/auditStore');
 
 function maskIdentifier(value) {
   if (typeof value !== 'string' || !value.trim()) return 'unknown';
@@ -17,6 +21,14 @@ function recordAudit({ event, identifier = '', outcome = 'success', details = ''
   };
 
   appendAuditEntry(entry);
+  void persistAuditEntryToPg({
+    eventTime: entry.timestamp,
+    eventType: entry.event,
+    identifierMasked: entry.identifierMasked,
+    outcome: entry.outcome,
+    details: entry.details
+  }).catch(() => {});
+
   return entry;
 }
 
