@@ -70,3 +70,29 @@ test('Emission et verification de jeton PKI simule + journal audit', async () =>
   const auditData = await auditRes.json();
   assert.ok(Array.isArray(auditData.logs));
 });
+
+test('Rejet d un code OTP invalide', async () => {
+  const identifier = '+242060000222';
+  const reqOtp = await fetch(`${BASE_URL}/api/otp/request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier })
+  });
+  assert.equal(reqOtp.status, 200);
+
+  const badVerify = await fetch(`${BASE_URL}/api/otp/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier, code: '000000' })
+  });
+  assert.equal(badVerify.status, 400);
+});
+
+test('Rejet d un jeton malforme ou falsifie', async () => {
+  const verifyBad = await fetch(`${BASE_URL}/api/token/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: 'cc1.invalid.signature' })
+  });
+  assert.ok(verifyBad.status >= 400 && verifyBad.status < 500);
+});
