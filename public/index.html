@@ -1,0 +1,216 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CongoConnect — Espace Citoyen & Verification</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #f4f7f9;
+      color: #1e293b;
+      line-height: 1.5;
+    }
+    header {
+      background-color: #0b4f32;
+      color: #ffffff;
+      padding: 16px 20px;
+      border-bottom: 4px solid #d4af37;
+    }
+    main {
+      max-width: 860px;
+      margin: 24px auto;
+      padding: 0 16px;
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 18px;
+      margin-bottom: 18px;
+    }
+    h2 {
+      margin-top: 0;
+      color: #0b4f32;
+      font-size: 18px;
+    }
+    label {
+      display: block;
+      font-weight: bold;
+      margin-top: 10px;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+    input, select {
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid #94a3b8;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    button {
+      margin-top: 12px;
+      margin-right: 8px;
+      background-color: #1e3a5f;
+      color: #ffffff;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .output {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background-color: #f1f5f9;
+      border-left: 4px solid #0b4f32;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="font-size: 20px; font-weight: bold;">CongoConnect — Portail Local (/app)</div>
+    <div style="font-size: 13px; color: #e2e8f0;">Republique du Congo • Verification d'identite, OTP, jetons et audit</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>1. Authentification OTP & Verification d'Identite</h2>
+      <label for="identifier">Identifiant (telephone ou NIU)</label>
+      <input id="identifier" type="text" value="+242060000000" />
+
+      <button type="button" onclick="demanderOtp()">Demander un code OTP</button>
+      <button type="button" onclick="verifierIdentite()">Verifier l'identite</button>
+
+      <label for="otp-code">Code OTP recu</label>
+      <input id="otp-code" type="text" placeholder="Saisir le code a 6 chiffres" />
+      <button type="button" onclick="validerOtp()">Valider le code OTP</button>
+
+      <div id="auth-result" class="output">Pret.</div>
+    </section>
+
+    <section class="card">
+      <h2>2. Signature & Verification de Jeton (PKI Simule)</h2>
+      <label for="token-scope">Portee (scope)</label>
+      <input id="token-scope" type="text" value="identity:verify" />
+
+      <button type="button" onclick="emettreJeton()">Emettre un jeton</button>
+      <button type="button" onclick="verifierJeton()">Verifier le jeton</button>
+
+      <label for="token-value">Jeton signe (cc1...)</label>
+      <input id="token-value" type="text" placeholder="Le jeton emis apparaitra ici ou collez un jeton" />
+
+      <div id="token-result" class="output">Pret.</div>
+    </section>
+
+    <section class="card">
+      <h2>3. Fournisseurs / Services Disponibles</h2>
+      <label for="category">Filtrer par categorie</label>
+      <select id="category">
+        <option value="">Tous</option>
+        <option value="paiement">paiement</option>
+        <option value="identite">identite</option>
+      </select>
+      <button type="button" onclick="chargerFournisseurs()">Charger la liste</button>
+
+      <div id="providers-result" class="output">Cliquez sur "Charger la liste".</div>
+    </section>
+
+    <section class="card">
+      <h2>4. Journal d'Audit Recent</h2>
+      <label for="audit-limit">Nombre d'entrees</label>
+      <input id="audit-limit" type="number" min="1" max="100" value="15" />
+      <button type="button" onclick="chargerAudit()">Actualiser l'audit</button>
+
+      <div id="audit-result" class="output">Cliquez sur "Actualiser l'audit".</div>
+    </section>
+  </main>
+
+  <script>
+    async function demanderOtp() {
+      const identifier = document.getElementById('identifier').value.trim();
+      const res = await fetch('/api/otp/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier })
+      });
+      const data = await res.json();
+      if (data.otp) {
+        document.getElementById('otp-code').value = data.otp;
+      }
+      document.getElementById('auth-result').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function validerOtp() {
+      const identifier = document.getElementById('identifier').value.trim();
+      const code = document.getElementById('otp-code').value.trim();
+      const res = await fetch('/api/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier, code })
+      });
+      const data = await res.json();
+      document.getElementById('auth-result').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function verifierIdentite() {
+      const identifier = document.getElementById('identifier').value.trim();
+      const res = await fetch('/api/identity/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier })
+      });
+      const data = await res.json();
+      document.getElementById('auth-result').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function emettreJeton() {
+      const subject = document.getElementById('identifier').value.trim();
+      const scope = document.getElementById('token-scope').value.trim();
+      const res = await fetch('/api/token/issue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject, scope })
+      });
+      const data = await res.json();
+      if (data.token) {
+        document.getElementById('token-value').value = data.token;
+      }
+      document.getElementById('token-result').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function verifierJeton() {
+      const token = document.getElementById('token-value').value.trim();
+      const res = await fetch('/api/token/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      const data = await res.json();
+      document.getElementById('token-result').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function chargerFournisseurs() {
+      const category = document.getElementById('category').value;
+      const query = category ? '?category=' + encodeURIComponent(category) : '';
+      const res = await fetch('/api/providers' + query);
+      const data = await res.json();
+      document.getElementById('providers-result').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function chargerAudit() {
+      const limit = document.getElementById('audit-limit').value || '15';
+      const res = await fetch('/api/audit?limit=' + encodeURIComponent(limit));
+      const data = await res.json();
+      document.getElementById('audit-result').textContent = JSON.stringify(data, null, 2);
+    }
+  </script>
+</body>
+</html>
