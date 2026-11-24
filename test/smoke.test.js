@@ -165,3 +165,22 @@ test('Limitation de debit OTP par identifiant (429)', async () => {
 
   assert.equal(got429, true);
 });
+
+test('Filtrage de /api/audit et etat des adaptateurs dans /health', async () => {
+  const healthRes = await fetch(`${BASE_URL}/health`);
+  assert.equal(healthRes.status, 200);
+  const health = await healthRes.json();
+  assert.ok(health.adapters);
+  assert.equal(typeof health.adapters.redis.configured, 'boolean');
+  assert.equal(typeof health.adapters.postgres.configured, 'boolean');
+
+  const auditRes = await fetch(`${BASE_URL}/api/audit?event=TOKEN_ISSUE&outcome=success&limit=10`);
+  assert.equal(auditRes.status, 200);
+  const audit = await auditRes.json();
+  assert.equal(audit.status, 'ok');
+  assert.ok(Array.isArray(audit.logs));
+  for (const item of audit.logs) {
+    assert.equal(item.event, 'TOKEN_ISSUE');
+    assert.equal(item.outcome, 'success');
+  }
+});

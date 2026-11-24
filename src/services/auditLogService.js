@@ -32,8 +32,34 @@ function recordAudit({ event, identifier = '', outcome = 'success', details = ''
   return entry;
 }
 
-function listAuditLogs(limit = 30) {
-  return readAuditEntries(limit);
+function listAuditLogs(options = 30) {
+  const opts = typeof options === 'object' && options !== null
+    ? options
+    : { limit: options };
+
+  const numericLimit = Number(opts.limit);
+  const safeLimit = Number.isFinite(numericLimit) && numericLimit > 0
+    ? Math.min(200, Math.floor(numericLimit))
+    : 30;
+
+  const eventFilter = typeof opts.event === 'string' ? opts.event.trim().toUpperCase() : '';
+  const outcomeFilter = typeof opts.outcome === 'string' ? opts.outcome.trim().toLowerCase() : '';
+
+  const fetchSize = (eventFilter || outcomeFilter) ? Math.max(safeLimit * 4, 100) : safeLimit;
+  const entries = readAuditEntries(fetchSize);
+
+  const filtered = entries.filter((item) => {
+    if (!item || typeof item !== 'object') return false;
+    if (eventFilter && String(item.event || '').toUpperCase() !== eventFilter) {
+      return false;
+    }
+    if (outcomeFilter && String(item.outcome || '').toLowerCase() !== outcomeFilter) {
+      return false;
+    }
+    return true;
+  });
+
+  return filtered.slice(0, safeLimit);
 }
 
 module.exports = {

@@ -113,6 +113,7 @@ const server = http.createServer(async (req, res) => {
         'GET /api/providers',
         'POST /api/token/issue',
         'POST /api/token/verify',
+        'POST /api/token/revoke',
         'GET /api/audit'
       ]
     });
@@ -124,6 +125,16 @@ const server = http.createServer(async (req, res) => {
       status: 'ok',
       service: 'CongoConnect',
       storageMode: config.storageMode,
+      adapters: {
+        redis: {
+          configured: Boolean(config.redisUrl),
+          mode: config.storageMode.otp
+        },
+        postgres: {
+          configured: Boolean(config.databaseUrl),
+          mode: config.storageMode.audit
+        }
+      },
       uptimeSeconds: Math.floor(process.uptime()),
       timestamp: new Date().toISOString()
     });
@@ -444,10 +455,17 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/api/audit') {
     const limit = url.searchParams.get('limit') || '30';
-    const logs = listAuditLogs(limit);
+    const event = url.searchParams.get('event') || '';
+    const outcome = url.searchParams.get('outcome') || '';
+    const logs = listAuditLogs({ limit, event, outcome });
     sendJson(res, 200, {
       status: 'ok',
       count: logs.length,
+      filters: {
+        event: event || null,
+        outcome: outcome || null,
+        limit: Number(limit) || 30
+      },
       logs
     });
     return;
