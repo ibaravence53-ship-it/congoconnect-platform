@@ -184,3 +184,27 @@ test('Filtrage de /api/audit et etat des adaptateurs dans /health', async () => 
     assert.equal(item.outcome, 'success');
   }
 });
+
+test('Trace d audit TOKEN_REVOKE apres revocation de jeton cc1.', async () => {
+  const issueRes = await fetch(`${BASE_URL}/api/token/issue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subject: '+242060000999', scope: 'identity:verify' })
+  });
+  assert.equal(issueRes.status, 200);
+  const issued = await issueRes.json();
+
+  const revokeRes = await fetch(`${BASE_URL}/api/token/revoke`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: issued.token, reason: 'smoke_audit_check' })
+  });
+  assert.equal(revokeRes.status, 200);
+
+  const auditRes = await fetch(`${BASE_URL}/api/audit?event=TOKEN_REVOKE&limit=5`);
+  assert.equal(auditRes.status, 200);
+  const auditData = await auditRes.json();
+  assert.ok(Array.isArray(auditData.logs));
+  assert.ok(auditData.logs.length >= 1);
+  assert.equal(auditData.logs[0].event, 'TOKEN_REVOKE');
+});
