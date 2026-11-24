@@ -208,3 +208,26 @@ test('Trace d audit TOKEN_REVOKE apres revocation de jeton cc1.', async () => {
   assert.ok(auditData.logs.length >= 1);
   assert.equal(auditData.logs[0].event, 'TOKEN_REVOKE');
 });
+
+test('Rejet d un jeton cc1. expire (exp passe)', async () => {
+  const nodeCrypto = require('node:crypto');
+  const payload = Buffer.from(JSON.stringify({
+    sub: '+242060000777',
+    scope: 'identity:verify',
+    jti: 'jti-expired-test',
+    iat: Math.floor(Date.now() / 1000) - 600,
+    exp: Math.floor(Date.now() / 1000) - 60
+  })).toString('base64url');
+  const sig = nodeCrypto
+    .createHmac('sha256', 'congoconnect-dev-secret-change-me')
+    .update(payload)
+    .digest('base64url');
+  const expiredToken = `cc1.${payload}.${sig}`;
+
+  const res = await fetch(`${BASE_URL}/api/token/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: expiredToken })
+  });
+  assert.equal(res.status, 401);
+});
