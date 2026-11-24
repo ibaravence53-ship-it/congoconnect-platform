@@ -6,7 +6,8 @@ const { requestOtp, verifyOtp } = require('./services/otpService');
 const { lookupIdentity } = require('./services/identityProviderSim');
 const { listProviders } = require('./services/serviceProviderRegistry');
 const { recordAudit, listAuditLogs } = require('./services/auditLogService');
-const { issueToken, verifyToken } = require('./services/pkiService');
+const { issueToken, verifyToken, revokeToken } = require('./services/pkiService');
+const { checkRateLimitAsync } = require('./services/rateLimiter');
 const { createServiceRequest, updateRequestStatus } = require('./services/requestService');
 
 const port = config.port;
@@ -137,7 +138,7 @@ const server = http.createServer(async (req, res) => {
         event: 'OTP_REQUEST_RATE_LIMITED',
         identifier: '',
         outcome: 'denied',
-        details: `ip=${ip}, retry=${rate.retryAfterSec}s`
+        details: 'ip=' + ip + ', retry=' + rate.retryAfterSec + 's'
       });
       sendJson(
         res,
@@ -154,6 +155,30 @@ const server = http.createServer(async (req, res) => {
 
     try {
       const body = await readJsonBody(req);
+      const cleanId = typeof body.identifier === 'string' ? body.identifier.trim() : '';
+      if (cleanId) {
+        const idRate = await checkRateLimitAsync('otp-id:' + cleanId, 5, 60 * 1000);
+        if (!idRate.allowed) {
+          recordAudit({
+            event: 'OTP_REQUEST_RATE_LIMITED',
+            identifier: cleanId,
+            outcome: 'denied',
+            details: 'scope=identifier, retry=' + idRate.retryAfterSeconds + 's'
+          });
+          sendJson(
+            res,
+            429,
+            {
+              status: 'error',
+              message: 'Trop de requetes OTP pour cet identifiant. Reessayez plus tard.',
+              retryAfterSeconds: idRate.retryAfterSeconds
+            },
+            { 'Retry-After': String(idRate.retryAfterSeconds) }
+          );
+          return;
+        }
+      }
+
       const result = requestOtp(body.identifier);
       if (!result.ok) {
         recordAudit({
@@ -169,7 +194,7 @@ const server = http.createServer(async (req, res) => {
         event: 'OTP_REQUEST',
         identifier: result.identifier,
         outcome: 'success',
-        details: `ttl=${result.expiresInSeconds}s`
+        details: 'ttl=' + result.expiresInSeconds + 's'
       });
       const payload = {
         status: 'ok',
@@ -321,22 +346,23 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/token/verify') {
     try {
       const body = await readJsonBody(req);
-      const result = verifyToken(body.token);
+      const requiredScope = body.requiredScope || body.scope || '';
+      const result = verifyToken(body.token, { requiredScope });
       if (!result.ok) {
         recordAudit({
           event: 'TOKEN_VERIFY',
           identifier: result.claims && result.claims.sub ? result.claims.sub : '',
           outcome: 'error',
-          details: result.error
+          details: requiredScope ? result.error + ' (requiredScope=' + requiredScope + ')' : result.error
         });
-        sendJson(res, 400, { status: 'error', valid: false, message: result.error });
+        sendJson(res, result.status || 400, { status: 'error', valid: false, message: result.error });
         return;
       }
       recordAudit({
         event: 'TOKEN_VERIFY',
         identifier: result.claims.sub,
         outcome: 'success',
-        details: `jti=${result.claims.jti}`
+        details: 'jti=' + result.claims.jti + ', scope=' + result.claims.scope
       });
       sendJson(res, 200, {
         status: 'ok',
@@ -349,7 +375,39 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-    if (req.method === 'POST' && url.pathname === '/api/requests') {
+  if (req.method === 'POST' && url.pathname === '/api/token/revoke') {
+    try {
+      const body = await readJsonBody(req);
+      const result = await revokeToken(body.token, body.reason || 'manual_revocation');
+      if (!result.ok) {
+        recordAudit({
+          event: 'TOKEN_REVOKE',
+          identifier: result.claims && result.claims.sub ? result.claims.sub : '',
+          outcome: 'error',
+          details: result.error
+        });
+        sendJson(res, result.status || 400, { status: 'error', revoked: false, message: result.error });
+        return;
+      }
+      recordAudit({
+        event: 'TOKEN_REVOKE',
+        identifier: result.claims.sub,
+        outcome: 'success',
+        details: 'jti=' + result.jti + ', reason=' + result.reason
+      });
+      sendJson(res, 200, {
+        status: 'ok',
+        revoked: true,
+        jti: result.jti,
+        expiresAt: result.expiresAt
+      });
+    } catch (err) {
+      sendJson(res, 400, { status: 'error', message: err.message });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/requests') {
     const body = await readJsonBody(req);
     const created = createServiceRequest({
       identifier: body.identifier,
@@ -405,5 +463,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, () => {
   console.log('CongoConnect en ecoute sur http://localhost:' + port);
 });
+
+
 
 

@@ -96,3 +96,72 @@ test('Rejet d un jeton malforme ou falsifie', async () => {
   });
   assert.ok(verifyBad.status >= 400 && verifyBad.status < 500);
 });
+
+test('Verification des scopes sur un jeton cc1.', async () => {
+  const issueRes = await fetch(`${BASE_URL}/api/token/issue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subject: '+242060000333', scope: 'identity:verify' })
+  });
+  assert.equal(issueRes.status, 200);
+  const issued = await issueRes.json();
+
+  const forbiddenRes = await fetch(`${BASE_URL}/api/token/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: issued.token, requiredScope: 'profile:write' })
+  });
+  assert.equal(forbiddenRes.status, 403);
+
+  const allowedRes = await fetch(`${BASE_URL}/api/token/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: issued.token, requiredScope: 'identity:verify' })
+  });
+  assert.equal(allowedRes.status, 200);
+});
+
+test('Revocation d un jeton cc1. et rejet apres revocation', async () => {
+  const issueRes = await fetch(`${BASE_URL}/api/token/issue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subject: '+242060000444', scope: 'identity:verify' })
+  });
+  assert.equal(issueRes.status, 200);
+  const issued = await issueRes.json();
+
+  const revokeRes = await fetch(`${BASE_URL}/api/token/revoke`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: issued.token, reason: 'test_revocation' })
+  });
+  assert.equal(revokeRes.status, 200);
+  const revoked = await revokeRes.json();
+  assert.equal(revoked.revoked, true);
+
+  const verifyAfterRevoke = await fetch(`${BASE_URL}/api/token/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: issued.token })
+  });
+  assert.equal(verifyAfterRevoke.status, 401);
+});
+
+test('Limitation de debit OTP par identifiant (429)', async () => {
+  const identifier = '+242060000555';
+  let got429 = false;
+
+  for (let i = 0; i < 8; i += 1) {
+    const res = await fetch(`${BASE_URL}/api/otp/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier })
+    });
+    if (res.status === 429) {
+      got429 = true;
+      break;
+    }
+  }
+
+  assert.equal(got429, true);
+});
