@@ -1,10 +1,10 @@
-﻿# CongoConnect Platform
+# CongoConnect Platform
 
 Plateforme de verification d identite, gestion OTP, emission/revocation de jetons PKI (`cc1.`) et supervision d audit (`GET /app`).
 
 ## Architecture et adaptateurs
 
-- **Console web (`/app`)** : creation/suivi des demandes, generation et verification OTP, gestion des jetons `cc1.` (`tokenPanel`) et visionneuse d audit filtrable (`auditPanel`).
+- **Console web (`/app`)** : creation et suivi des demandes, generation et verification OTP, gestion des jetons `cc1.` (`tokenPanel`) et visionneuse d audit filtrable (`auditPanel`).
 - **Sante et observabilite** :
   - `GET /health` : expose l etat du service et le mode des adaptateurs (`redis`, `postgres`) sans fuite de secrets.
   - `GET /api/audit` : journal d audit filtrable par `event`, `outcome` et `limit` avec masquage des identifiants.
@@ -28,3 +28,4 @@ Copier `.env.example` puis renseigner les variables selon l environnement :
 ```powershell
 node .\src\server.js
 node --test .\test\smoke.test.js
+```
