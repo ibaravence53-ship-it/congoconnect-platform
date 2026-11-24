@@ -7,6 +7,7 @@ const { lookupIdentity } = require('./services/identityProviderSim');
 const { listProviders } = require('./services/serviceProviderRegistry');
 const { recordAudit, listAuditLogs } = require('./services/auditLogService');
 const { issueToken, verifyToken } = require('./services/pkiService');
+const { createServiceRequest, updateRequestStatus } = require('./services/requestService');
 
 const port = config.port;
 const hideOtp = config.hideOtpInResponse;
@@ -348,6 +349,41 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+    if (req.method === 'POST' && url.pathname === '/api/requests') {
+    const body = await readJsonBody(req);
+    const created = createServiceRequest({
+      identifier: body.identifier,
+      providerId: body.providerId,
+      amount: body.amount,
+      purpose: body.purpose
+    });
+
+    if (!created.ok) {
+      recordAudit('REQUEST_CREATE_REJECTED', body.identifier || 'unknown', 'error', created.error);
+      return sendJson(res, 400, { status: 'error', message: created.error });
+    }
+
+    recordAudit('REQUEST_CREATED', created.request.identifier, 'ok', 'id=' + created.request.id + ',provider=' + created.request.providerId);
+    return sendJson(res, 201, { status: 'ok', request: created.request });
+  }
+
+    const statusMatch = req.method === 'PATCH' ? url.pathname.match(/^\/api\/requests\/([^/]+)\/status$/) : null;
+  if (statusMatch) {
+    const reqId = decodeURIComponent(statusMatch[1]);
+    const body = await readJsonBody(req);
+    const nextStatus = body && body.status ? body.status : '';
+    const updated = updateRequestStatus(reqId, nextStatus);
+
+    if (!updated.ok) {
+      const statusCode = updated.error && updated.error.startsWith('Demande introuvable') ? 404 : 400;
+      recordAudit('REQUEST_STATUS_REJECTED', reqId, 'error', updated.error || 'statut invalide');
+      return sendJson(res, statusCode, { status: 'error', message: updated.error });
+    }
+
+    recordAudit('REQUEST_STATUS_UPDATED', updated.request.identifier, 'ok', 'id=' + updated.request.id + ',status=' + updated.request.status);
+    return sendJson(res, 200, { status: 'ok', request: updated.request });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/audit') {
     const limit = url.searchParams.get('limit') || '30';
     const logs = listAuditLogs(limit);
@@ -369,3 +405,5 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, () => {
   console.log('CongoConnect en ecoute sur http://localhost:' + port);
 });
+
+
