@@ -18,7 +18,7 @@ test('GET /app retourne la page HTML', async () => {
 });
 
 test('Flux OTP complet : demande, validation puis rejet en relecture', async () => {
-  const identifier = '+242060000111';
+  const identifier = `+2420600001${String(Date.now()).slice(-4)}`;
 
   const reqOtp = await fetch(`${BASE_URL}/api/otp/request`, {
     method: 'POST',
@@ -72,7 +72,7 @@ test('Emission et verification de jeton PKI simule + journal audit', async () =>
 });
 
 test('Rejet d un code OTP invalide', async () => {
-  const identifier = '+242060000222';
+  const identifier = `+2420600002${String(Date.now()).slice(-4)}`;
   const reqOtp = await fetch(`${BASE_URL}/api/otp/request`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -148,7 +148,7 @@ test('Revocation d un jeton cc1. et rejet apres revocation', async () => {
 });
 
 test('Limitation de debit OTP par identifiant (429)', async () => {
-  const identifier = '+242060000555';
+  const identifier = `+2420600005${String(Date.now()).slice(-4)}`;
   let got429 = false;
 
   for (let i = 0; i < 8; i += 1) {
@@ -230,4 +230,41 @@ test('Rejet d un jeton cc1. expire (exp passe)', async () => {
     body: JSON.stringify({ token: expiredToken })
   });
   assert.equal(res.status, 401);
+});
+
+test('Verification QR via POST /api/qr/verify (valide et rejet)', async () => {
+  const issueRes = await fetch(`${BASE_URL}/api/token/issue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subject: '+242060000777', scope: 'identity:verify' })
+  });
+  assert.equal(issueRes.status, 200);
+  const issued = await issueRes.json();
+  assert.ok(issued.token);
+
+  const okRes = await fetch(`${BASE_URL}/api/qr/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: issued.token, requiredScope: 'identity:verify' })
+  });
+  assert.equal(okRes.status, 200);
+
+  const badRes = await fetch(`${BASE_URL}/api/qr/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: 'cc1.invalid.signature' })
+  });
+  assert.ok(badRes.status === 400 || badRes.status === 401);
+});
+
+test('Export audit via GET /api/audit/export en JSON et CSV', async () => {
+  const jsonRes = await fetch(`${BASE_URL}/api/audit/export?format=json`);
+  assert.equal(jsonRes.status, 200);
+  const jsonBody = await jsonRes.json();
+  assert.ok(Array.isArray(jsonBody.logs) || Array.isArray(jsonBody));
+
+  const csvRes = await fetch(`${BASE_URL}/api/audit/export?format=csv`);
+  assert.equal(csvRes.status, 200);
+  const csvText = await csvRes.text();
+  assert.ok(csvText.includes('event') || csvText.includes('timestamp'));
 });

@@ -32,6 +32,25 @@ function recordAudit({ event, identifier = '', outcome = 'success', details = ''
   return entry;
 }
 
+
+function parseIsoMs(val) {
+  if (!val || typeof val !== "string") return null;
+  const ms = Date.parse(val);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function buildAuditSummary(logs) {
+  const byEvent = {};
+  const byOutcome = {};
+  for (const item of logs) {
+    const ev = item && item.event ? String(item.event) : "UNKNOWN";
+    const out = item && item.outcome ? String(item.outcome) : "unknown";
+    byEvent[ev] = (byEvent[ev] || 0) + 1;
+    byOutcome[out] = (byOutcome[out] || 0) + 1;
+  }
+  return { total: logs.length, byEvent, byOutcome };
+}
+
 function listAuditLogs(options = 30) {
   const opts = typeof options === 'object' && options !== null
     ? options
@@ -58,12 +77,21 @@ function listAuditLogs(options = 30) {
     }
     return true;
   });
-
-  return filtered.slice(0, safeLimit);
+  const sinceMs = options && options.since ? parseIsoMs(options.since) : null;
+  const untilMs = options && options.until ? parseIsoMs(options.until) : null;
+  const baseList = filtered.slice(0, safeLimit);
+  const timeFiltered = (Array.isArray(baseList) ? baseList : []).filter((entry) => {
+    const ts = entry && entry.timestamp ? Date.parse(entry.timestamp) : NaN;
+    if (sinceMs !== null && !Number.isNaN(ts) && ts < sinceMs) return false;
+    if (untilMs !== null && !Number.isNaN(ts) && ts > untilMs) return false;
+    return true;
+  });
+  return timeFiltered;
 }
 
 module.exports = {
-  recordAudit,
+recordAudit,
   listAuditLogs,
-  maskIdentifier
+  maskIdentifier,
+  buildAuditSummary
 };

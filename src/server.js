@@ -5,10 +5,18 @@ const config = require('./config/env');
 const { requestOtp, verifyOtp } = require('./services/otpService');
 const { lookupIdentity } = require('./services/identityProviderSim');
 const { listProviders } = require('./services/serviceProviderRegistry');
-const { recordAudit, listAuditLogs } = require('./services/auditLogService');
-const { issueToken, verifyToken, revokeToken } = require('./services/pkiService');
+const { recordAudit, listAuditLogs, buildAuditSummary } = require('./services/auditLogService');
+const { issueToken, verifyToken, revokeToken , isTokenRevokedAsync: _pkiIsRevokedAsync, isTokenRevoked: _pkiIsRevoked} = require('./services/pkiService');
 const { checkRateLimitAsync } = require('./services/rateLimiter');
 const { createServiceRequest, updateRequestStatus } = require('./services/requestService');
+
+
+async function isTokenRevokedAsync(jti) {
+  if (!jti) return false;
+  if (typeof _pkiIsRevokedAsync === 'function') return Boolean(await _pkiIsRevokedAsync(jti));
+  if (typeof _pkiIsRevoked === 'function') return Boolean(await _pkiIsRevoked(jti));
+  return false;
+}
 
 const port = config.port;
 const hideOtp = config.hideOtpInResponse;
@@ -386,6 +394,103 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/qr/verify') {
+    const body = await readJsonBody(req);
+    let rawToken = typeof body.token === 'string' ? body.token.trim() : '';
+    let requiredScope = typeof body.requiredScope === 'string' ? body.requiredScope.trim() : '';
+
+    if (!rawToken && typeof body.qrPayload === 'string') {
+      const payloadStr = body.qrPayload.trim();
+      if (payloadStr.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(payloadStr);
+          rawToken = typeof parsed.token === 'string' ? parsed.token.trim() : '';
+          if (!requiredScope && typeof parsed.requiredScope === 'string') {
+            requiredScope = parsed.requiredScope.trim();
+          }
+        } catch (_) {
+          // Traite la charge utile brute comme un jeton si ce n'est pas un JSON valide
+        }
+      }
+      if (!rawToken) {
+        rawToken = payloadStr;
+      }
+    }
+
+    const result = verifyToken(rawToken, { requiredScope: requiredScope || undefined });
+    const revokedAsync = result.claims?.jti ? await isTokenRevokedAsync(result.claims.jti) : false;
+
+    if (!result.ok || revokedAsync) {
+      const statusCode = revokedAsync ? 401 : (result.status || 400);
+      const errorMsg = revokedAsync ? 'Jeton revoque' : result.error;
+      recordAudit({
+        event: 'TOKEN_VERIFY',
+        identifier: result.claims?.sub || 'unknown',
+        outcome: 'error',
+        details: 'qr_verify:' + errorMsg
+      });
+      return sendJson(res, statusCode, { ok: false, error: errorMsg, claims: result.claims || null });
+    }
+
+    recordAudit({
+      event: 'TOKEN_VERIFY',
+      identifier: result.claims?.sub || 'unknown',
+      outcome: 'success',
+      details: 'qr_verify:jti=' + result.claims.jti
+    });
+    return sendJson(res, 200, { ok: true, valid: true, claims: result.claims });
+  }
+
+
+  if (req.method === 'POST' && url.pathname === '/api/token/inspect') {
+    try {
+      const body = await readJsonBody(req);
+      const token = typeof body.token === 'string' ? body.token.trim() : '';
+      const writeAudit = body.audit !== false;
+
+      if (!token) {
+        sendJson(res, 400, { status: 'error', message: 'Jeton requis.' });
+        return;
+      }
+
+      const verified = await verifyToken(token, { allowExpired: true, allowRevoked: true });
+      const claims = verified && verified.claims ? verified.claims : null;
+      const nowSec = Math.floor(Date.now() / 1000);
+      const expired = claims && typeof claims.exp === 'number' ? claims.exp <= nowSec : false;
+      const revoked = Boolean(verified && verified.revoked);
+      const signatureValid = Boolean(verified && verified.valid !== false && claims);
+
+      if (writeAudit) {
+        recordAudit({
+          event: 'TOKEN_INSPECT',
+          identifier: claims && claims.sub ? claims.sub : '',
+          outcome: signatureValid ? 'success' : 'denied',
+          details: 'jti=' + (claims && claims.jti ? claims.jti : 'n/a') + ', revoked=' + revoked + ', expired=' + expired
+        });
+      }
+
+      sendJson(res, 200, {
+        status: 'ok',
+        active: Boolean(signatureValid && !revoked && !expired),
+        signatureValid,
+        revoked,
+        expired,
+        claims: claims
+          ? {
+              sub: claims.sub || null,
+              scope: claims.scope || null,
+              jti: claims.jti || null,
+              iat: claims.iat || null,
+              exp: claims.exp || null
+            }
+          : null
+      });
+    } catch (err) {
+      sendJson(res, 400, { status: 'error', message: err.message || 'Inspection impossible.' });
+    }
+    return;
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/token/revoke') {
     try {
       const body = await readJsonBody(req);
@@ -453,6 +558,63 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { status: 'ok', request: updated.request });
   }
 
+
+  if (req.method === 'GET' && url.pathname === '/api/requests/summary') {
+    const reqSvc = require('./services/requestService');
+    const items = typeof reqSvc.listServiceRequests === 'function' ? await reqSvc.listServiceRequests({}) : [];
+    const byStatus = { created: 0, processing: 0, completed: 0, cancelled: 0 };
+    const enriched = [];
+
+    for (const r of (Array.isArray(items) ? items : [])) {
+      const st = r && r.status ? r.status : 'created';
+      byStatus[st] = (byStatus[st] || 0) + 1;
+      let otpVerified = Boolean(r && r.otpVerified);
+      if (!otpVerified && typeof reqSvc.isOtpVerified === 'function' && r && r.identifier) {
+        otpVerified = Boolean(await reqSvc.isOtpVerified(r.identifier));
+      }
+      enriched.push({ ...r, otpVerified });
+    }
+
+    sendJson(res, 200, {
+      status: 'ok',
+      total: enriched.length,
+      byStatus,
+      requests: enriched
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/audit/export') {
+    const format = (url.searchParams.get('format') || 'json').trim().toLowerCase();
+    const limit = url.searchParams.get('limit') || '100';
+    const event = url.searchParams.get('event') || '';
+    const outcome = url.searchParams.get('outcome') || '';
+    const logs = listAuditLogs({ limit, event, outcome });
+
+    if (format === 'csv') {
+      const escapeCsv = (val) => '"' + String(val ?? '').replace(/"/g, '""') + '"';
+      const header = ['timestamp', 'event', 'outcome', 'identifierMasked', 'details'].join(',');
+      const rows = logs.map((item) => [
+        escapeCsv(item.timestamp),
+        escapeCsv(item.event),
+        escapeCsv(item.outcome),
+        escapeCsv(item.identifierMasked),
+        escapeCsv(item.details)
+      ].join(','));
+      res.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="congoconnect-audit.csv"'
+      });
+      return res.end([header, ...rows].join("\n"));
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="congoconnect-audit.json"'
+    });
+    return res.end(JSON.stringify({ count: logs.length, logs }, null, 2));
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/audit') {
     const limit = url.searchParams.get('limit') || '30';
     const event = url.searchParams.get('event') || '';
@@ -481,6 +643,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, () => {
   console.log('CongoConnect en ecoute sur http://localhost:' + port);
 });
+
 
 
 
