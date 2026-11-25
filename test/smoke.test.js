@@ -268,3 +268,47 @@ test('Export audit via GET /api/audit/export en JSON et CSV', async () => {
   const csvText = await csvRes.text();
   assert.ok(csvText.includes('event') || csvText.includes('timestamp'));
 });
+
+test('Inspection de jeton via POST /api/token/inspect', async () => {
+  const issueRes = await fetch(`${BASE_URL}/api/token/issue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subject: '+242060000888', scope: 'identity:read' })
+  });
+  assert.equal(issueRes.status, 200);
+  const issued = await issueRes.json();
+
+  const inspectRes = await fetch(`${BASE_URL}/api/token/inspect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: issued.token, audit: false })
+  });
+  assert.equal(inspectRes.status, 200);
+  const inspected = await inspectRes.json();
+  assert.equal(inspected.signatureValid, true);
+  assert.equal(inspected.revoked, false);
+  assert.equal(inspected.expired, false);
+  assert.equal(inspected.active, true);
+});
+
+test('Resume des demandes via GET /api/requests/summary', async () => {
+  const res = await fetch(`${BASE_URL}/api/requests/summary`);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.status, 'ok');
+  assert.equal(typeof data.total, 'number');
+  assert.ok(data.byStatus && typeof data.byStatus === 'object');
+  assert.ok(Array.isArray(data.requests));
+});
+
+test('Filtrage temporel since/until et summary sur GET /api/audit', async () => {
+  const now = Date.now();
+  const since = encodeURIComponent(new Date(now - 60 * 60 * 1000).toISOString());
+  const until = encodeURIComponent(new Date(now + 60 * 60 * 1000).toISOString());
+  const res = await fetch(`${BASE_URL}/api/audit?since=${since}&until=${until}`);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.status, 'ok');
+  assert.ok(Array.isArray(data.logs));
+  assert.ok(data.summary && typeof data.summary.total === 'number');
+});

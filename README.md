@@ -29,3 +29,19 @@ Copier `.env.example` puis renseigner les variables selon l environnement :
 node .\src\server.js
 node --test .\test\smoke.test.js
 ```
+
+## Nouveaux endpoints et fonctionnalités (v1)
+
+- **`POST /api/qr/verify`** : vérification d'un jeton ou d'une charge QR (`token`, `requiredScope`) avec contrôle de signature, expiration et révocation, et traçage d'audit.
+- **`POST /api/token/inspect`** : inspection détaillée d'un jeton (`active`, `signatureValid`, `revoked`, `expired`, `claims`) avec option `audit: false`.
+- **`GET /api/audit` & `GET /api/audit/export`** : filtrage par `event`, `outcome`, `since` et `until`, agrégats `summary` (`total`, `byEvent`, `byOutcome`) et export `json` / `csv`.
+- **`GET /api/requests/summary`** : synthèse des demandes par statut (`created`, `processing`, `completed`, `cancelled`) et enrichissement `otpVerified`.
+- **Interface multilingue (`FR`, `LN`, `KG`)** : bascule de langue dans l'interface web (`GET /app`).
+
+## Démarrage et tests
+
+```powershell
+cp .env.example .env
+node .\src\server.js
+node --test .\test\smoke.test.js
+```

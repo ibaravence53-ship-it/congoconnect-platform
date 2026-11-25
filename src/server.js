@@ -619,15 +619,22 @@ const server = http.createServer(async (req, res) => {
     const limit = url.searchParams.get('limit') || '30';
     const event = url.searchParams.get('event') || '';
     const outcome = url.searchParams.get('outcome') || '';
-    const logs = listAuditLogs({ limit, event, outcome });
+    const since = url.searchParams.get('since') || '';
+    const until = url.searchParams.get('until') || '';
+    const logs = listAuditLogs({ limit, event, outcome, since, until });
     sendJson(res, 200, {
       status: 'ok',
       count: logs.length,
       filters: {
         event: event || null,
         outcome: outcome || null,
+        since: since || null,
+        until: until || null,
         limit: Number(limit) || 30
       },
+      summary: typeof buildAuditSummary === 'function'
+        ? buildAuditSummary(logs)
+        : { total: logs.length, byEvent: {}, byOutcome: {} },
       logs
     });
     return;
